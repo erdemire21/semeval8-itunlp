@@ -15,6 +15,7 @@ ERROR_LLM=deepseek-ai/DeepSeek-R1
 ```
 
 ### Environment Variables
+Any provider that has an OpenAI compatible API can be used by modifying the following environment variables:
 
 - `API_KEY`: Your API key for accessing the LLM services
 - `API_BASE_URL`: The base URL for the API endpoint
