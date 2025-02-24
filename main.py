@@ -27,7 +27,7 @@ def load_schemas(schema_path):
 def load_questions(qa_path):
     """Load the questions from file."""
     with open(qa_path, encoding='utf-8') as f:
-        return json.load(f)
+        return json.load(f)[:10]
 
 
 def process_question(question_data, schemas, max_retries=1):
@@ -248,7 +248,8 @@ def run_pipeline(schema_path, qa_path, output_path, sample_output_path, max_retr
     #     results.append(result)
 
     # Save intermediate results
-    intermediate_file = "all_qa_pandas_code_not_executed.json"
+    intermediate_file = "intermediate_results/all_qa_pandas_code_not_executed.json"
+    pathlib.Path(intermediate_file).parent.mkdir(parents=True, exist_ok=True)
     with open(intermediate_file, "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=4)
 

@@ -1,7 +1,7 @@
 from pydantic import BaseModel
 from typing import List, Union
 import openai
-from utils import update_counter, get_text_after_last_think_tag
+from utilities.utils import update_counter, get_text_after_last_think_tag
 import os
 from dotenv import load_dotenv
 
