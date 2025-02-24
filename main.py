@@ -236,11 +236,13 @@ def run_pipeline(schema_path, qa_path, output_path, sample_output_path, max_retr
     # Generate pandas code with error checking
     print("Generating pandas code with error checking...")
     results = []
+
     with ThreadPoolExecutor(max_workers=16) as executor:
         for result in tqdm(executor.map(lambda q: process_question(q, schemas, max_retries), questions),
                            total=len(questions)):
             results.append(result)
-    # Run the following to run without threads
+
+    # Uncomment the following and comment the prior code blocks to run without threads
     # for question in tqdm(questions, total=len(questions)):
     #     result = process_question(question, schemas, max_retries)
     #     results.append(result)
@@ -266,8 +268,8 @@ def run_pipeline(schema_path, qa_path, output_path, sample_output_path, max_retr
 
 if __name__ == "__main__":
     # Define paths
-    SCHEMA_PATH = '../preprocessing/pandas_schemas.json'
-    QA_PATH = '../preprocessing/all_qa.json'
+    SCHEMA_PATH = 'data/pandas_schemas.json'
+    QA_PATH = 'data/all_qa.json'
     OUTPUT_PATH = 'intermediate_results/code_execution_results.json'
     SAMPLE_OUTPUT_PATH = 'intermediate_results/code_execution_results_sample.json'
 

@@ -114,20 +114,26 @@ def get_column_unique_values_summary_string(df):
 
 
 def main():
+    # Path to the competition folder which contains the test_qa.csv file. It should also contain the sample and all parquet files.
+    TEST_QA_PATH = 'competition/test_qa.csv'  
+    
+    # Output directory structure
+    OUTPUT_ROOT = os.path.join("..", "data")  # Root directory for all output files
+    SAMPLE_DATASETS_DIR = os.path.join(OUTPUT_ROOT, "sample_datasets")  # Directory for sample dataset parquet files
+    ALL_DATASETS_DIR = os.path.join(OUTPUT_ROOT, "all_datasets")  # Directory for complete dataset parquet files
+    SCHEMA_OUTPUT_PATH = os.path.join(OUTPUT_ROOT, 'pandas_schemas.json')  # Path for the schema summary JSON
+    QA_JSON_OUTPUT_PATH = os.path.join(OUTPUT_ROOT, "all_qa.json")  # Path for the processed QA JSON file
+    
+    # Create output directories if they don't exist
+    for directory in [OUTPUT_ROOT, SAMPLE_DATASETS_DIR, ALL_DATASETS_DIR]:
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+
     # Step 1: Fixing and Creating Datasets 
     print("Step 1: Processing datasets and creating parquet files...")
     # Read the test_qa file to get dataset names
-    df = pd.read_csv('competition/test_qa.csv')
+    df = pd.read_csv(TEST_QA_PATH)
     datasets = df['dataset'].unique()
-    output_dir = os.path.join("..", "data")
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-    sample_dir = os.path.join(output_dir, "sample_datasets")
-    if not os.path.exists(sample_dir):
-        os.makedirs(sample_dir)
-    all_dir = os.path.join(output_dir, "all_datasets")
-    if not os.path.exists(all_dir):
-        os.makedirs(all_dir)
 
     for dataset in datasets:
         print(f"Processing dataset: {dataset}")
@@ -137,34 +143,31 @@ def main():
         df_sample = rename_columns_for_sql(df_sample)
         df_table = rename_columns_for_sql(df_table)
 
-        df_sample.to_parquet(os.path.join(sample_dir, f"{dataset}.parquet"))
-        df_table.to_parquet(os.path.join(all_dir, f"{dataset}.parquet"))
+        df_sample.to_parquet(os.path.join(SAMPLE_DATASETS_DIR, f"{dataset}.parquet"))
+        df_table.to_parquet(os.path.join(ALL_DATASETS_DIR, f"{dataset}.parquet"))
 
     # Step 2: Creating Schema Summary
     print("Step 2: Generating schema summaries for all datasets...")
-    parquet_directory = all_dir
-    files = os.listdir(parquet_directory)
+    files = os.listdir(ALL_DATASETS_DIR)
     print(f"Parquet files found: {files}")
     schemas = {}
 
     for file in tqdm(files):
         if file.endswith('.parquet'):
-            file_path = os.path.join(parquet_directory, file)
+            file_path = os.path.join(ALL_DATASETS_DIR, file)
             df_parquet = pd.read_parquet(file_path)
             summary_string = get_column_unique_values_summary_string(df_parquet)
             file_name = file.split('.')[0]
             schemas[file_name] = summary_string
 
-    with open(os.path.join(output_dir, 'pandas_schemas.json'), 'w', encoding='utf-8') as f:
+    with open(SCHEMA_OUTPUT_PATH, 'w', encoding='utf-8') as f:
         json.dump(schemas, f, ensure_ascii=False, indent=4)
 
     # Step 3: Creating QA JSON file from QA CSV
     print("Step 3: Creating QA JSON file...")
-    qa_csv_path = "competition/test_qa.csv"
-    qa_df = pd.read_csv(qa_csv_path)
+    qa_df = pd.read_csv(TEST_QA_PATH)
     qa_json = qa_df.to_dict(orient="records")
-    qa_json_path = os.path.join(output_dir, "all_qa.json")
-    with open(qa_json_path, "w") as f:
+    with open(QA_JSON_OUTPUT_PATH, "w") as f:
         json.dump(qa_json, f, indent=2)
 
     print("All processing complete.")
