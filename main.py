@@ -27,10 +27,10 @@ def load_schemas(schema_path):
 def load_questions(qa_path):
     """Load the questions from file."""
     with open(qa_path, encoding='utf-8') as f:
-        return json.load(f)[:10]
+        return json.load(f)
 
 
-def process_question(question_data, schemas, max_retries=1):
+def process_question(question_data, schemas, dataset_folder_path, max_retries=1):
     """Process a single question to generate pandas code with error checking and retrying."""
     try:
         MAIN_QUESTION = question_data['question']
@@ -42,7 +42,7 @@ def process_question(question_data, schemas, max_retries=1):
         pandas_code = get_pandas_code(DATASET, MAIN_QUESTION, dataset_info)
 
         # Test the code on sample dataset
-        modified_code = modify_parquet_paths(pandas_code, is_sample=True)
+        modified_code = modify_parquet_paths(pandas_code, dataset_folder_path=dataset_folder_path, is_sample=True)
         modified_code = clean_pandas_code(modified_code)
         retries = 0
 
@@ -62,7 +62,7 @@ def process_question(question_data, schemas, max_retries=1):
                 # If there's an error and we have retries left, try to fix it
                 error_code = (clean_pandas_code(pandas_code), str(exec_output))
                 pandas_code = get_pandas_code(DATASET, MAIN_QUESTION, dataset_info, error_code=error_code)
-                modified_code = modify_parquet_paths(pandas_code, is_sample=True)
+                modified_code = modify_parquet_paths(pandas_code, dataset_folder_path=dataset_folder_path, is_sample=True)
                 modified_code = clean_pandas_code(modified_code)
                 retries += 1
 
@@ -73,15 +73,15 @@ def process_question(question_data, schemas, max_retries=1):
         return question_data
 
 
-def modify_parquet_paths(code, fixed_path="../datasets/", is_sample=False):
+def modify_parquet_paths(code, dataset_folder_path="../datasets/", is_sample=False):
     """Modifies pd.read_parquet paths in the code to prepend a fixed path."""
     if is_sample:
-        fixed_path += "sample_datasets/"
+        dataset_folder_path += "sample_datasets/"
     else:
-        fixed_path += "all_datasets/"
+        dataset_folder_path += "all_datasets/"
     return re.sub(
         r"pd\.read_parquet\(['\"](.*?\.parquet)['\"]\)",
-        lambda match: f"pd.read_parquet('{fixed_path}{match.group(1)}')",
+        lambda match: f"pd.read_parquet('{dataset_folder_path}{match.group(1)}')",
         code
     )
 
@@ -202,13 +202,13 @@ def clean_pandas_code(raw_code):
     return cleaned_code
 
 
-def execute_pandas_code(data, fixed_path="../datasets/", is_sample=False):
+def execute_pandas_code(data, dataset_folder_path="../datasets/", is_sample=False):
     """
     Execute pandas code for each question and capture results.
 
     Args:
         data (list): A list of dictionaries containing pandas code under the 'pandas_code' key.
-        fixed_path (str): The path to fix in the parquet files.
+        dataset_folder_path (str): The path to fix in the parquet files.
         is_sample (bool): Flag to determine whether to use sample datasets.
 
     Returns:
@@ -220,14 +220,14 @@ def execute_pandas_code(data, fixed_path="../datasets/", is_sample=False):
         cleaned_code = clean_pandas_code(raw_code)
 
         # Modify the parquet paths and execute the code
-        modified_code = modify_parquet_paths(cleaned_code, fixed_path=fixed_path, is_sample=is_sample)
+        modified_code = modify_parquet_paths(cleaned_code, dataset_folder_path=dataset_folder_path, is_sample=is_sample)
         result = capture_exec_output(modified_code)
         entry['final_answer'] = result
 
     return convert_types(data)
 
 
-def run_pipeline(schema_path, qa_path, output_path, sample_output_path, max_retries=1):
+def run_pipeline(schema_path, qa_path, output_path, sample_output_path, max_retries=1, dataset_folder_path="data/"):
     """Run the complete pipeline with error checking and retrying."""
     # Load input data
     schemas = load_schemas(schema_path)
@@ -238,14 +238,8 @@ def run_pipeline(schema_path, qa_path, output_path, sample_output_path, max_retr
     results = []
 
     with ThreadPoolExecutor(max_workers=16) as executor:
-        for result in tqdm(executor.map(lambda q: process_question(q, schemas, max_retries), questions),
-                           total=len(questions)):
+        for result in tqdm(executor.map(lambda q: process_question(q, schemas, dataset_folder_path, max_retries), questions), total=len(questions)):
             results.append(result)
-
-    # Uncomment the following and comment the prior code blocks to run without threads
-    # for question in tqdm(questions, total=len(questions)):
-    #     result = process_question(question, schemas, max_retries)
-    #     results.append(result)
 
     # Save intermediate results
     intermediate_file = "intermediate_results/all_qa_pandas_code_not_executed.json"
@@ -255,13 +249,13 @@ def run_pipeline(schema_path, qa_path, output_path, sample_output_path, max_retr
 
     # Execute code and save results for both full and sample datasets
     print("Executing code on full datasets...")
-    full_results = execute_pandas_code(results.copy())
+    full_results = execute_pandas_code(results.copy(), dataset_folder_path=dataset_folder_path)
     pathlib.Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, 'w', encoding='utf-8') as f:
         json.dump(full_results, f, ensure_ascii=False, indent=4)
 
     print("Executing code on sample datasets...")
-    sample_results = execute_pandas_code(results.copy(), is_sample=True)
+    sample_results = execute_pandas_code(results.copy(), dataset_folder_path=dataset_folder_path, is_sample=True)
     pathlib.Path(sample_output_path).parent.mkdir(parents=True, exist_ok=True)
     with open(sample_output_path, 'w', encoding='utf-8') as f:
         json.dump(sample_results, f, ensure_ascii=False, indent=4)
@@ -273,6 +267,7 @@ if __name__ == "__main__":
     QA_PATH = 'data/all_qa.json'
     OUTPUT_PATH = 'intermediate_results/code_execution_results.json'
     SAMPLE_OUTPUT_PATH = 'intermediate_results/code_execution_results_sample.json'
+    DATASET_FOLDER_PATH = 'data/'
 
-    # Run the pipeline with 1 retry attempt
-    run_pipeline(SCHEMA_PATH, QA_PATH, OUTPUT_PATH, SAMPLE_OUTPUT_PATH, max_retries=1) 
+    # Run the pipeline with 1 retry attempt and default dataset folder path
+    run_pipeline(SCHEMA_PATH, QA_PATH, OUTPUT_PATH, SAMPLE_OUTPUT_PATH, max_retries=1, dataset_folder_path=DATASET_FOLDER_PATH)
