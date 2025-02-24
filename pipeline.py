@@ -240,6 +240,7 @@ def run_pipeline(schema_path, qa_path, output_path, sample_output_path, max_retr
         for result in tqdm(executor.map(lambda q: process_question(q, schemas, max_retries), questions),
                            total=len(questions)):
             results.append(result)
+    # Run the following to run without threads
     # for question in tqdm(questions, total=len(questions)):
     #     result = process_question(question, schemas, max_retries)
     #     results.append(result)
@@ -265,8 +266,8 @@ def run_pipeline(schema_path, qa_path, output_path, sample_output_path, max_retr
 
 if __name__ == "__main__":
     # Define paths
-    SCHEMA_PATH = '../2_Schema_Creation/pandas_schemas.json'
-    QA_PATH = '../3_qa_creation/all_qa.json'
+    SCHEMA_PATH = '../preprocessing/pandas_schemas.json'
+    QA_PATH = '../preprocessing/all_qa.json'
     OUTPUT_PATH = 'intermediate_results/code_execution_results.json'
     SAMPLE_OUTPUT_PATH = 'intermediate_results/code_execution_results_sample.json'
 
