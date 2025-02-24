@@ -113,7 +113,52 @@ def get_column_unique_values_summary_string(df):
     return intro + "\n".join(summary_lines)
 
 
-def main():
+def main(test_qa_path, output_root, sample_datasets_dir, all_datasets_dir, schema_output_path, qa_json_output_path):
+    # Step 1: Fixing and Creating Datasets 
+    print("Step 1: Processing datasets and creating parquet files...")
+    # Read the test_qa file to get dataset names
+    df = pd.read_csv(test_qa_path)
+    datasets = df['dataset'].unique()
+
+    for dataset in datasets:
+        print(f"Processing dataset: {dataset}")
+        df_sample = load_sample(dataset)
+        df_table = load_table(dataset)
+
+        df_sample = rename_columns_for_sql(df_sample)
+        df_table = rename_columns_for_sql(df_table)
+
+        df_sample.to_parquet(os.path.join(sample_datasets_dir, f"{dataset}.parquet"))
+        df_table.to_parquet(os.path.join(all_datasets_dir, f"{dataset}.parquet"))
+
+    # Step 2: Creating Schema Summary
+    print("Step 2: Generating schema summaries for all datasets...")
+    files = os.listdir(all_datasets_dir)
+    print(f"Parquet files found: {files}")
+    schemas = {}
+
+    for file in tqdm(files):
+        if file.endswith('.parquet'):
+            file_path = os.path.join(all_datasets_dir, file)
+            df_parquet = pd.read_parquet(file_path)
+            summary_string = get_column_unique_values_summary_string(df_parquet)
+            file_name = file.split('.')[0]
+            schemas[file_name] = summary_string
+
+    with open(schema_output_path, 'w', encoding='utf-8') as f:
+        json.dump(schemas, f, ensure_ascii=False, indent=4)
+
+    # Step 3: Creating QA JSON file from QA CSV
+    print("Step 3: Creating QA JSON file...")
+    qa_df = pd.read_csv(test_qa_path)
+    qa_json = qa_df.to_dict(orient="records")
+    with open(qa_json_output_path, "w") as f:
+        json.dump(qa_json, f, indent=2)
+
+    print("All processing complete.")
+
+
+if __name__ == "__main__":
     # Path to the competition folder which contains the test_qa.csv file. It should also contain the sample and all parquet files.
     TEST_QA_PATH = 'competition/test_qa.csv'  
     
@@ -128,50 +173,5 @@ def main():
     for directory in [OUTPUT_ROOT, SAMPLE_DATASETS_DIR, ALL_DATASETS_DIR]:
         if not os.path.exists(directory):
             os.makedirs(directory)
-
-    # Step 1: Fixing and Creating Datasets 
-    print("Step 1: Processing datasets and creating parquet files...")
-    # Read the test_qa file to get dataset names
-    df = pd.read_csv(TEST_QA_PATH)
-    datasets = df['dataset'].unique()
-
-    for dataset in datasets:
-        print(f"Processing dataset: {dataset}")
-        df_sample = load_sample(dataset)
-        df_table = load_table(dataset)
-
-        df_sample = rename_columns_for_sql(df_sample)
-        df_table = rename_columns_for_sql(df_table)
-
-        df_sample.to_parquet(os.path.join(SAMPLE_DATASETS_DIR, f"{dataset}.parquet"))
-        df_table.to_parquet(os.path.join(ALL_DATASETS_DIR, f"{dataset}.parquet"))
-
-    # Step 2: Creating Schema Summary
-    print("Step 2: Generating schema summaries for all datasets...")
-    files = os.listdir(ALL_DATASETS_DIR)
-    print(f"Parquet files found: {files}")
-    schemas = {}
-
-    for file in tqdm(files):
-        if file.endswith('.parquet'):
-            file_path = os.path.join(ALL_DATASETS_DIR, file)
-            df_parquet = pd.read_parquet(file_path)
-            summary_string = get_column_unique_values_summary_string(df_parquet)
-            file_name = file.split('.')[0]
-            schemas[file_name] = summary_string
-
-    with open(SCHEMA_OUTPUT_PATH, 'w', encoding='utf-8') as f:
-        json.dump(schemas, f, ensure_ascii=False, indent=4)
-
-    # Step 3: Creating QA JSON file from QA CSV
-    print("Step 3: Creating QA JSON file...")
-    qa_df = pd.read_csv(TEST_QA_PATH)
-    qa_json = qa_df.to_dict(orient="records")
-    with open(QA_JSON_OUTPUT_PATH, "w") as f:
-        json.dump(qa_json, f, indent=2)
-
-    print("All processing complete.")
-
-
-if __name__ == "__main__":
-    main() 
+            
+    main(TEST_QA_PATH, OUTPUT_ROOT, SAMPLE_DATASETS_DIR, ALL_DATASETS_DIR, SCHEMA_OUTPUT_PATH, QA_JSON_OUTPUT_PATH) 
