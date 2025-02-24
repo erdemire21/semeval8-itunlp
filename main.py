@@ -6,7 +6,7 @@ import numpy as np
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import redirect_stdout
 from tqdm import tqdm
-from agents import get_pandas_code
+from utilities.agents import get_pandas_code
 import os
 import ast
 import pandas as pd
