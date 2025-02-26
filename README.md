@@ -32,7 +32,18 @@ The project pipeline is designed to run in three sequential steps:
      python preprocessing/preprocessing.py
      ```
    - This step prepares and pre-processes raw competition data such as datasets and questions.
-   - **Note:** For competition tasks, please ensure that the folder containing competition datasets and questions is placed within the `competition` folder. For example:
+   - **Note:** For competition tasks, please ensure that the folder containing competition datasets and questions is placed within the `competition` folder. The hierarchy should be as follows:
+
+     ```
+     competition
+     ├── dataset1
+     │   ├── all.parquet
+     │   ├── sample.parquet
+     ├── dataset2
+     │   ├── all.parquet
+     │   ├── sample.parquet
+     ├── test_qa.csv
+     ```
 
 2. **Main Pipeline**:
    - Execute the main pipeline by running:
