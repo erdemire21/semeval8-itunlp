@@ -107,7 +107,7 @@ if __name__ == '__main__':
     PREDICTIONS_PATH = 'predictions/predictions.txt'
 
     SAMPLE_RESULTS_PATH = '../intermediate_results/code_execution_results_sample.json'
-    SAMPLE_PREDICTIONS_PATH = 'predictions/sample_predictions.txt'
+    SAMPLE_PREDICTIONS_PATH = 'predictions/predictions_lite.txt'
 
     process_json_to_predictions(ALL_RESULTS_PATH, PREDICTIONS_PATH)
     process_json_to_predictions(SAMPLE_RESULTS_PATH, SAMPLE_PREDICTIONS_PATH)
