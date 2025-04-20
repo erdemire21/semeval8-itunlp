@@ -10,7 +10,7 @@ from utilities.agents import get_pandas_code
 import os
 import ast
 import pandas as pd
-
+from utilities.utils import get_text_after_last_think_tag
 import logging
 import traceback
 
@@ -61,7 +61,7 @@ def process_question(question_data, schemas, dataset_folder_path, max_retries=1)
     question_data.setdefault("error_history", [])
 
     # NEW -------------  keep track of *all* failed code/error pairs -------------
-    previous_attempts = []          # [(code, error_msg), ...]
+    previous_attempts = []  # [(code, error_msg), ...]
     # ---------------------------------------------------------------------------
 
     try:
@@ -75,7 +75,7 @@ def process_question(question_data, schemas, dataset_folder_path, max_retries=1)
 
         # Save original code before path modification
         original_code = clean_pandas_code(pandas_code)
-        
+
         # Test the code on sample dataset
         modified_code = modify_parquet_paths(pandas_code, dataset_folder_path=dataset_folder_path, is_sample=True)
         modified_code = clean_pandas_code(modified_code)
@@ -125,9 +125,9 @@ def process_question(question_data, schemas, dataset_folder_path, max_retries=1)
 
                 # If there's an error and we have retries left, try to fix it
                 if len(previous_attempts) == 1:
-                    error_arg = previous_attempts[0]           # tuple, old behaviour
+                    error_arg = previous_attempts[0]  # tuple, old behaviour
                 else:
-                    error_arg = previous_attempts[:]           # list – new behaviour
+                    error_arg = previous_attempts[:]  # list – new behaviour
 
                 pandas_code = get_pandas_code(
                     DATASET,
@@ -135,10 +135,10 @@ def process_question(question_data, schemas, dataset_folder_path, max_retries=1)
                     dataset_info,
                     error_code=error_arg
                 )
-                
+
                 # Update original code with the new code from LLM
                 original_code = clean_pandas_code(pandas_code)
-                
+
                 modified_code = modify_parquet_paths(
                     pandas_code,
                     dataset_folder_path=dataset_folder_path,
@@ -197,6 +197,7 @@ def capture_exec_output(code):
 
     Dynamically extracts imports from the code and includes them in the execution context.
     """
+
     def extract_imports(code):
         """
         Extract all imported modules and objects from the given code.
@@ -295,6 +296,7 @@ def clean_pandas_code(raw_code):
     Returns:
         str: The cleaned Python code.
     """
+    raw_code = get_text_after_last_think_tag(raw_code)
     raw_code = raw_code.strip()
     if '```python' in raw_code:
         # Extract everything between '```python' and the next '```'
@@ -331,34 +333,66 @@ def execute_pandas_code(data, dataset_folder_path="../datasets/", is_sample=Fals
 
 
 def run_pipeline(schema_path, qa_path, output_path, sample_output_path, max_retries=1, dataset_folder_path="data/"):
-    """Run the complete pipeline with error checking and retrying."""
+    """Run the complete pipeline with error checking, checkpointing, and retrying."""
     # Load input data
     schemas = load_schemas(schema_path)
     questions = load_questions(qa_path)
 
-    # Generate pandas code with error checking
-    print("Generating pandas code with error checking...")
-    results = []
+    # ── CHECKPOINTING ADDED ──
+    batch_dir = "batch_processing_intermediate"
+    pathlib.Path(batch_dir).mkdir(parents=True, exist_ok=True)
 
-    with ThreadPoolExecutor(max_workers=16) as executor:
-        for result in tqdm(executor.map(lambda q: process_question(q, schemas, dataset_folder_path, max_retries), questions), total=len(questions)):
-            results.append(result)
+    total = len(questions)
+    batch_size = 32
+    num_batches = (total + batch_size - 1) // batch_size
 
-    # Save intermediate results
+    all_results = []
+    for batch_idx in range(num_batches):
+        start = batch_idx * batch_size
+        end = min(start + batch_size, total)
+        batch_file = os.path.join(batch_dir, f"batch_{batch_idx + 1}.json")
+
+        if os.path.exists(batch_file):
+            # load existing batch results
+            with open(batch_file, 'r', encoding='utf-8') as f:
+                batch_results = json.load(f)
+            print(f"Loaded batch {batch_idx + 1} from checkpoint ({start}:{end}).")
+        else:
+            # process this batch
+            print(f"Processing batch {batch_idx + 1}/{num_batches} ({start}:{end})...")
+            subset = questions[start:end]
+            with ThreadPoolExecutor(max_workers=16) as executor:
+                batch_results = list(tqdm(
+                    executor.map(lambda q: process_question(q, schemas, dataset_folder_path, max_retries), subset),
+                    total=len(subset),
+                    desc=f"Batch {batch_idx + 1}"
+                ))
+            # save intermediate
+            with open(batch_file, 'w', encoding='utf-8') as f:
+                json.dump(batch_results, f, ensure_ascii=False, indent=4)
+            print(f"Saved checkpoint for batch {batch_idx + 1}.")
+
+        all_results.extend(batch_results)
+
+    # ── END CHECKPOINTING ──
+
+    # At this point, all_results contains every question’s processed code
+    # Save combined intermediate just like before
     intermediate_file = "intermediate_results/all_qa_pandas_code_not_executed.json"
     pathlib.Path(intermediate_file).parent.mkdir(parents=True, exist_ok=True)
     with open(intermediate_file, "w", encoding="utf-8") as f:
-        json.dump(results, f, ensure_ascii=False, indent=4)
+        json.dump(all_results, f, ensure_ascii=False, indent=4)
 
-    # Execute code and save results for both full and sample datasets
+    # Execute code on full datasets
     print("Executing code on full datasets...")
-    full_results = execute_pandas_code(results.copy(), dataset_folder_path=dataset_folder_path)
+    full_results = execute_pandas_code(all_results.copy(), dataset_folder_path=dataset_folder_path)
     pathlib.Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, 'w', encoding='utf-8') as f:
         json.dump(full_results, f, ensure_ascii=False, indent=4)
 
+    # Execute code on sample datasets
     print("Executing code on sample datasets...")
-    sample_results = execute_pandas_code(results.copy(), dataset_folder_path=dataset_folder_path, is_sample=True)
+    sample_results = execute_pandas_code(all_results.copy(), dataset_folder_path=dataset_folder_path, is_sample=True)
     pathlib.Path(sample_output_path).parent.mkdir(parents=True, exist_ok=True)
     with open(sample_output_path, 'w', encoding='utf-8') as f:
         json.dump(sample_results, f, ensure_ascii=False, indent=4)
@@ -372,8 +406,15 @@ if __name__ == "__main__":
     SAMPLE_OUTPUT_PATH = 'intermediate_results/code_execution_results_sample.json'
     DATASET_FOLDER_PATH = 'data/'
 
-    # Run the pipeline with 1 retry attempt and default dataset folder path
-    run_pipeline(SCHEMA_PATH, QA_PATH, OUTPUT_PATH, SAMPLE_OUTPUT_PATH, max_retries=2, dataset_folder_path=DATASET_FOLDER_PATH)
+    # Run the pipeline with 2 retry attempts and default dataset folder path
+    run_pipeline(
+        SCHEMA_PATH,
+        QA_PATH,
+        OUTPUT_PATH,
+        SAMPLE_OUTPUT_PATH,
+        max_retries=2,
+        dataset_folder_path=DATASET_FOLDER_PATH
+    )
 
     # Just log the location without displaying contents
     print(f"\nError log saved to: {log_file}")

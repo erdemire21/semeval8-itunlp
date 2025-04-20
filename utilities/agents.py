@@ -4,6 +4,7 @@ import openai
 from utilities.utils import get_text_after_last_think_tag
 import os
 from dotenv import load_dotenv
+import re
 
 # Load environment variables
 load_dotenv()
@@ -131,11 +132,13 @@ def get_pandas_code(
     CURRENT_LLM = ERROR_LLM if error_code else MAIN_LLM
     CURRENT_PROVIDER = ERROR_LLM_PROVIDER if error_code else MAIN_LLM_PROVIDER
 
+    max_tokens = 8000 if isinstance(error_code, list) else 5000
+
     chat_completion = CURRENT_PROVIDER.chat.completions.create(
         model=CURRENT_LLM,
         messages=[{"role": "user", "content": user_prompt}],
-        temperature=temperature,
-        max_tokens=5000,
+        temperature=0,
+        max_tokens=max_tokens,
     )
     to_return = get_text_after_last_think_tag(chat_completion.choices[0].message.content)
     return to_return
