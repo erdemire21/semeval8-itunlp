@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import List, Union
+from typing import List, Tuple, Union
 import openai
 from utilities.utils import get_text_after_last_think_tag
 import os
@@ -20,17 +20,26 @@ MAIN_LLM_PROVIDER = openai.OpenAI(
 MAIN_LLM = os.getenv("MAIN_LLM", "deepseek-ai/DeepSeek-R1")  # Default model
 ERROR_LLM = os.getenv("ERROR_LLM", "deepseek-ai/DeepSeek-R1")  # Error handling model
 
-def get_pandas_code(dataset_name, question, schema, temperature=0, error_code=None):
+
+def get_pandas_code(
+    dataset_name: str,
+    question: str,
+    schema: str,
+    temperature: float = 0,
+    error_code: Union[Tuple[str, str], List[Tuple[str, str]], None] = None
+) -> str:
     """
     Generates Python code using pandas to answer a given question based on a dataset schema.
-    If error_code is provided, it attempts to fix the error in the previous code.
+    If error_code is provided, it attempts to fix the error(s) in the previous code.
 
     Parameters:
     dataset_name (str): The name of the dataset.
     question (str): The question to be answered using the dataset.
     schema (str): The schema of the dataset.
     temperature (float): Temperature for LLM generation.
-    error_code (tuple, optional): Tuple containing (previous_code, error_message).
+    error_code (tuple or list[tuple], optional):
+        * If a single retry, a 2‑tuple (previous_code, error_message).
+        * If multiple retries, a list of such tuples ordered oldest→newest.
 
     Returns:
     str: The generated Python code as a string.
@@ -69,12 +78,14 @@ def get_pandas_code(dataset_name, question, schema, temperature=0, error_code=No
     user_prompt += (
         f"The following python code made for pandas for the parquet file {dataset_name}.parquet reads the parquet file and "
         f"running it returns the answer that is enough to answer the question `{question}`"
-        )
+    )
 
+    # ------------------  Error‑handling / retry specific block --------------
     if error_code:
-        prev_code, error_msg = error_code
+        if isinstance(error_code, tuple):
+            prev_code, error_msg = error_code
 
-        user_prompt = f'''
+            user_prompt = f'''
                     Please fix the code to properly answer the question: `{question}`
                     Dataset schema: {schema}
                     Follow these instructions:
@@ -83,10 +94,39 @@ def get_pandas_code(dataset_name, question, schema, temperature=0, error_code=No
                     ```python
                     {prev_code}
                     ```
-                    Error: {error_msg} Solve the error and provide the corrected code'''
-        user_prompt += (
-            f"The following python code made for pandas for the parquet file {dataset_name}.parquet reads the parquet file and "
-            f"running it returns the answer that is enough to answer the question `{question}` with the error fixed")
+                    Error: {error_msg} Solve the error and provide the corrected code '''
+            user_prompt += (
+                f"The following python code made for pandas for the parquet file {dataset_name}.parquet reads the parquet file and "
+                f"running it returns the answer that is enough to answer the question `{question}` with the error fixed"
+            )
+
+        # Handle *multiple* previous errors – new behaviour
+        elif isinstance(error_code, list):
+            # keep the *latest* attempt exactly as the single‑retry prompt
+            last_code, last_error = error_code[-1]
+
+            user_prompt = f'''
+                    Please fix the code to properly answer the question: `{question}`
+                    Dataset schema: {schema}
+                    Follow these instructions:
+                    {instructions}
+                    The following code generated an error when executed:
+                    ```python
+                    {last_code}
+                    ```
+                    Error: {last_error} Solve the error and provide the corrected code'''
+
+            # -------- Append an *extra* section enumerating earlier failures -----
+            user_prompt += "\n\nHere are earlier attempts that also failed:\n"
+            for idx, (p_code, p_err) in enumerate(error_code[:-1], start=1):
+                user_prompt += f"\nAttempt {idx}:\n{p_code}\n```\nError: {p_err}\n"
+
+            user_prompt += (
+                f"The following python code made for pandas for the parquet file {dataset_name}.parquet reads the parquet file and "
+                f"running it returns the answer that is enough to answer the question `{question}` with the error fixed"
+            )
+
+
 
     CURRENT_LLM = ERROR_LLM if error_code else MAIN_LLM
     CURRENT_PROVIDER = ERROR_LLM_PROVIDER if error_code else MAIN_LLM_PROVIDER

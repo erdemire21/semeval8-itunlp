@@ -52,13 +52,17 @@ def load_schemas(schema_path):
 def load_questions(qa_path):
     """Load the questions from file."""
     with open(qa_path, encoding='utf-8') as f:
-        return json.load(f)[:10]
+        return json.load(f)
 
 
 def process_question(question_data, schemas, dataset_folder_path, max_retries=1):
     """Process a single question to generate pandas code with error checking and retrying."""
     # initialize per-question error history
     question_data.setdefault("error_history", [])
+
+    # NEW -------------  keep track of *all* failed code/error pairs -------------
+    previous_attempts = []          # [(code, error_msg), ...]
+    # ---------------------------------------------------------------------------
 
     try:
         MAIN_QUESTION = question_data['question']
@@ -69,6 +73,9 @@ def process_question(question_data, schemas, dataset_folder_path, max_retries=1)
         error_code = None
         pandas_code = get_pandas_code(DATASET, MAIN_QUESTION, dataset_info)
 
+        # Save original code before path modification
+        original_code = clean_pandas_code(pandas_code)
+        
         # Test the code on sample dataset
         modified_code = modify_parquet_paths(pandas_code, dataset_folder_path=dataset_folder_path, is_sample=True)
         modified_code = clean_pandas_code(modified_code)
@@ -108,13 +115,35 @@ def process_question(question_data, schemas, dataset_folder_path, max_retries=1)
                     MAIN_QUESTION, retries, category, type(exec_error).__name__, str(exec_error), modified_code
                 )
 
+                # ------------ keep a concise record for the next LLM call ---------
+                # Use original code (without path modifications) for error reporting to LLM
+                previous_attempts.append(
+                    (original_code, str(exec_error))
+                )
                 if retries == max_retries:
                     break
 
                 # If there's an error and we have retries left, try to fix it
-                error_code = (clean_pandas_code(pandas_code), str(exec_output))
-                pandas_code = get_pandas_code(DATASET, MAIN_QUESTION, dataset_info, error_code=error_code)
-                modified_code = modify_parquet_paths(pandas_code, dataset_folder_path=dataset_folder_path, is_sample=True)
+                if len(previous_attempts) == 1:
+                    error_arg = previous_attempts[0]           # tuple, old behaviour
+                else:
+                    error_arg = previous_attempts[:]           # list – new behaviour
+
+                pandas_code = get_pandas_code(
+                    DATASET,
+                    MAIN_QUESTION,
+                    dataset_info,
+                    error_code=error_arg
+                )
+                
+                # Update original code with the new code from LLM
+                original_code = clean_pandas_code(pandas_code)
+                
+                modified_code = modify_parquet_paths(
+                    pandas_code,
+                    dataset_folder_path=dataset_folder_path,
+                    is_sample=True
+                )
                 modified_code = clean_pandas_code(modified_code)
                 retries += 1
 
@@ -344,9 +373,7 @@ if __name__ == "__main__":
     DATASET_FOLDER_PATH = 'data/'
 
     # Run the pipeline with 1 retry attempt and default dataset folder path
-    run_pipeline(SCHEMA_PATH, QA_PATH, OUTPUT_PATH, SAMPLE_OUTPUT_PATH, max_retries=1, dataset_folder_path=DATASET_FOLDER_PATH)
+    run_pipeline(SCHEMA_PATH, QA_PATH, OUTPUT_PATH, SAMPLE_OUTPUT_PATH, max_retries=2, dataset_folder_path=DATASET_FOLDER_PATH)
 
-    # Display the error log at the end of the run
-    print(f"\nError log saved to: {log_file}\n")
-    with open(log_file, 'r', encoding='utf-8') as f:
-        print(f.read())
+    # Just log the location without displaying contents
+    print(f"\nError log saved to: {log_file}")
