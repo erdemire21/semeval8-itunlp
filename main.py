@@ -11,11 +11,36 @@ import os
 import ast
 import pandas as pd
 
-# Get the directory of the current file
-current_file_directory = os.path.dirname(os.path.abspath(__file__))
+import logging
+import traceback
 
-# Change the current working directory to the directory of the current file
-os.chdir(current_file_directory)
+# Setup error logging
+MAIN_LLM_ENV = os.environ.get("MAIN_LLM", "default")
+# sanitize MAIN_LLM so that any slashes become underscores
+sanitized_name = re.sub(r"[\\/]", "_", MAIN_LLM_ENV)
+logs_dir = "error_logs"
+os.makedirs(logs_dir, exist_ok=True)
+log_file = os.path.join(logs_dir, f"{sanitized_name}.log")
+
+logger = logging.getLogger("error_logger")
+handler = logging.FileHandler(log_file)
+formatter = logging.Formatter("%(asctime)s %(threadName)s %(levelname)s %(message)s")
+handler.setFormatter(formatter)
+logger.addHandler(handler)
+logger.setLevel(logging.INFO)
+
+
+def classify_error(exc):
+    """Classify an exception into syntax, logic, data-type, or other."""
+    msg = str(exc).lower()
+    if isinstance(exc, SyntaxError) or "syntax error" in msg or "unexpected eof" in msg:
+        return "syntax"
+    elif isinstance(exc, TypeError) or "dtype" in msg or "typeerror" in msg:
+        return "data-type"
+    elif "groupby" in msg or "aggregation" in msg or "cannot insert" in msg:
+        return "logic"
+    else:
+        return "other"
 
 
 def load_schemas(schema_path):
@@ -27,11 +52,14 @@ def load_schemas(schema_path):
 def load_questions(qa_path):
     """Load the questions from file."""
     with open(qa_path, encoding='utf-8') as f:
-        return json.load(f)
+        return json.load(f)[:10]
 
 
 def process_question(question_data, schemas, dataset_folder_path, max_retries=1):
     """Process a single question to generate pandas code with error checking and retrying."""
+    # initialize per-question error history
+    question_data.setdefault("error_history", [])
+
     try:
         MAIN_QUESTION = question_data['question']
         DATASET = question_data['dataset']
@@ -54,11 +82,35 @@ def process_question(question_data, schemas, dataset_folder_path, max_retries=1)
                 exec_output = capture_exec_output(clean_pandas_code(modified_code))
                 if isinstance(exec_output, str) and 'Error' in exec_output:
                     raise Exception(exec_output)
+
+                # successful execution
+                question_data["status"] = "success"
                 break  # If successful, break the loop
 
             except Exception as exec_error:
+                # classify the error
+                category = classify_error(exec_error)
+                tb = traceback.format_exc()
+
+                # append to this question's history, including the code that caused the error
+                question_data["error_history"].append({
+                    "iteration": retries,
+                    "error_type": category,
+                    "exception": type(exec_error).__name__,
+                    "message": str(exec_error),
+                    "traceback": tb,
+                    "code": modified_code
+                })
+
+                # log to the shared error log
+                logger.error(
+                    "Question: %s | Iteration: %d | Type: %s | Exception: %s | Message: %s | Code: %s",
+                    MAIN_QUESTION, retries, category, type(exec_error).__name__, str(exec_error), modified_code
+                )
+
                 if retries == max_retries:
                     break
+
                 # If there's an error and we have retries left, try to fix it
                 error_code = (clean_pandas_code(pandas_code), str(exec_output))
                 pandas_code = get_pandas_code(DATASET, MAIN_QUESTION, dataset_info, error_code=error_code)
@@ -66,9 +118,32 @@ def process_question(question_data, schemas, dataset_folder_path, max_retries=1)
                 modified_code = clean_pandas_code(modified_code)
                 retries += 1
 
+        # if we never succeeded, mark as failed
+        if question_data.get("status") != "success":
+            question_data["status"] = "failed"
+
         question_data['pandas_code'] = pandas_code
         return question_data
+
     except Exception as e:
+        # catch any unexpected top-level error
+        question_data["status"] = "failed"
+        category = classify_error(e)
+        tb = traceback.format_exc()
+        # include whatever pandas_code was last set (if any)
+        last_code = question_data.get('pandas_code', '')
+        question_data["error_history"].append({
+            "iteration": None,
+            "error_type": category,
+            "exception": type(e).__name__,
+            "message": str(e),
+            "traceback": tb,
+            "code": last_code
+        })
+        logger.error(
+            "Question: %s | Top-level Exception: %s | Message: %s | Code: %s",
+            question_data.get('question'), type(e).__name__, str(e), last_code
+        )
         question_data['pandas_code'] = str(e)
         return question_data
 
@@ -93,7 +168,6 @@ def capture_exec_output(code):
 
     Dynamically extracts imports from the code and includes them in the execution context.
     """
-
     def extract_imports(code):
         """
         Extract all imported modules and objects from the given code.
@@ -126,7 +200,7 @@ def capture_exec_output(code):
     dynamic_imports = extract_imports(code)
 
     # Prepare the execution environment with built-ins and dynamic imports
-    execution_globals = { "__builtins__": __builtins__, "np": np, "pd": pd, "ast": ast}
+    execution_globals = {"__builtins__": __builtins__, "np": np, "pd": pd, "ast": ast}
     execution_globals.update(dynamic_imports)
 
     f = io.StringIO()
@@ -163,7 +237,7 @@ def capture_exec_output(code):
         else:
             return 'None'  # No output, no variables
     except Exception as e:
-        return "Error :"+ str(e)  # Return exception as a string
+        return "Error :" + str(e)  # Return exception as a string
 
 
 def convert_types(obj):
@@ -271,3 +345,8 @@ if __name__ == "__main__":
 
     # Run the pipeline with 1 retry attempt and default dataset folder path
     run_pipeline(SCHEMA_PATH, QA_PATH, OUTPUT_PATH, SAMPLE_OUTPUT_PATH, max_retries=1, dataset_folder_path=DATASET_FOLDER_PATH)
+
+    # Display the error log at the end of the run
+    print(f"\nError log saved to: {log_file}\n")
+    with open(log_file, 'r', encoding='utf-8') as f:
+        print(f.read())
