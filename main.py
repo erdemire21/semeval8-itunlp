@@ -287,6 +287,9 @@ def convert_types(obj):
         return [convert_types(item) for item in obj]
     elif isinstance(obj, dict):
         return {key: convert_types(value) for key, value in obj.items()}
+    elif isinstance(obj, pd.DataFrame):
+        first_row = obj.iloc[0].to_dict()
+        return ', '.join(f'{k}={v}' for k, v in first_row.items())
     else:
         return obj
 
