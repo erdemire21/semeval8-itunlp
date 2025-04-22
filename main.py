@@ -202,29 +202,34 @@ def capture_exec_output(code):
         """
         Extract all imported modules and objects from the given code.
         Returns a dictionary of imported modules and their names.
+        If an error occurs during parsing, returns an empty dictionary.
         """
-        tree = ast.parse(code)
-        imports = {}
+        try:
+            tree = ast.parse(code)
+            imports = {}
 
-        for node in ast.walk(tree):
-            # Handle `import` statements
-            if isinstance(node, ast.Import):
-                for alias in node.names:
-                    module_name = alias.name
-                    as_name = alias.asname or alias.name
-                    imports[as_name] = __import__(module_name)
+            for node in ast.walk(tree):
+                # Handle `import` statements
+                if isinstance(node, ast.Import):
+                    for alias in node.names:
+                        module_name = alias.name
+                        as_name = alias.asname or alias.name
+                        imports[as_name] = __import__(module_name)
 
-            # Handle `from ... import ...` statements
-            elif isinstance(node, ast.ImportFrom):
-                module_name = node.module
-                for alias in node.names:
-                    name = alias.name
-                    as_name = alias.asname or alias.name
-                    if module_name:
-                        full_name = f"{module_name}.{name}"
-                        imports[as_name] = __import__(module_name, fromlist=[name]).__dict__[name]
+                # Handle `from ... import ...` statements
+                elif isinstance(node, ast.ImportFrom):
+                    module_name = node.module
+                    for alias in node.names:
+                        name = alias.name
+                        as_name = alias.asname or alias.name
+                        if module_name:
+                            full_name = f"{module_name}.{name}"
+                            imports[as_name] = __import__(module_name, fromlist=[name]).__dict__[name]
 
-        return imports
+            return imports
+        except Exception:
+            # Return empty dictionary if any error occurs during import extraction
+            return {}
 
     # Extract imports from the code
     dynamic_imports = extract_imports(code)
@@ -361,7 +366,7 @@ def run_pipeline(schema_path, qa_path, output_path, sample_output_path, max_retr
             # process this batch
             print(f"Processing batch {batch_idx + 1}/{num_batches} ({start}:{end})...")
             subset = questions[start:end]
-            with ThreadPoolExecutor(max_workers=16) as executor:
+            with ThreadPoolExecutor(max_workers=8) as executor:
                 batch_results = list(tqdm(
                     executor.map(lambda q: process_question(q, schemas, dataset_folder_path, max_retries), subset),
                     total=len(subset),
