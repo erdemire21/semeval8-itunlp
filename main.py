@@ -287,6 +287,10 @@ def convert_types(obj):
         return [convert_types(item) for item in obj]
     elif isinstance(obj, dict):
         return {key: convert_types(value) for key, value in obj.items()}
+    elif isinstance(obj, pd.DataFrame):
+        return obj.to_string(index=False)
+    elif callable(obj):
+        return f"<callable {obj.__name__}>"
     else:
         return obj
 
