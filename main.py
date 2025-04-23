@@ -276,13 +276,15 @@ def capture_exec_output(code):
 
 
 def convert_types(obj):
-    """Convert NumPy types to Python native types for JSON serialization."""
+    """Convert NumPy types and sets to Python native types for JSON serialization."""
     if isinstance(obj, np.bool_):
         return bool(obj)
     elif isinstance(obj, np.integer):
         return int(obj)
     elif isinstance(obj, np.ndarray):
         return obj.tolist()
+    elif isinstance(obj, set):
+        return [convert_types(item) for item in obj]
     elif isinstance(obj, (list, tuple)):
         return [convert_types(item) for item in obj]
     elif isinstance(obj, dict):
